@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const fetch = require('node-fetch');
-const { startCallerService, scheduleCallback } = require('./services/callerService');
+const { startCallerService, scheduleCallback, sendCaregiverSMS, generateWeeklyReport } = require('./services/callerService');
 const Groq = require('groq-sdk');
 
 const app = express();
@@ -36,9 +36,10 @@ app.post('/call/start', (req, res) => {
     
     const twiml = `
         <Response>
-            <Gather input="speech" action="/call/response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}" timeout="5">
-                <Say>Hello! This is ElderEase reminding you to take your ${medicineName}. Have you taken it?</Say>
+            <Gather input="dtmf" action="/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}" numDigits="1" timeout="5">
+                <Say>Hello! This is ElderEase reminding you to take your ${medicineName}. Press 1 if taken. Press 2 if not taken.</Say>
             </Gather>
+            <Redirect>/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}</Redirect>
         </Response>
     `;
     res.type('text/xml');
@@ -87,6 +88,29 @@ app.post('/call/response', async (req, res) => {
     res.send(twimlResponse);
 });
 
+app.post('/call/ivr-response', async (req, res) => {
+    const { Digits } = req.body;
+    const medicineName = req.query.medicineName || 'your medicine';
+    const uid = req.query.uid;
+    
+    let twimlResponse = '<Response><Say>Goodbye.</Say></Response>';
+
+    if (Digits === '1') {
+        twimlResponse = '<Response><Say>Thank you for taking your medicine. Have a great day!</Say></Response>';
+        await sendCaregiverSMS(uid, medicineName, 'taken');
+    } else if (Digits === '2') {
+        scheduleCallback(uid, medicineName, 15);
+        twimlResponse = '<Response><Say>I will call you back in 15 minutes. Please remember to take your medicine.</Say></Response>';
+        await sendCaregiverSMS(uid, medicineName, 'not taken');
+    } else {
+        // No input
+        await sendCaregiverSMS(uid, medicineName, 'no response');
+    }
+    
+    res.type('text/xml');
+    res.send(twimlResponse);
+});
+
 app.post('/call/sugar-check', (req, res) => {
     const twiml = `
         <Response>
@@ -120,6 +144,21 @@ app.post('/call/sugar-response', (req, res) => {
 app.post('/call/workout-response', (req, res) => {
     res.type('text/xml');
     res.send('<Response><Say>Great! Keep it up. Goodbye.</Say></Response>');
+});
+
+app.get('/report/:uid', async (req, res) => {
+    const uid = req.params.uid;
+    try {
+        const reportText = await generateWeeklyReport(uid);
+        if (reportText) {
+            res.json({ success: true, report: reportText });
+        } else {
+            res.status(404).json({ success: false, error: 'User not found or report could not be generated' });
+        }
+    } catch (err) {
+        console.error('Error in /report/:uid route:', err);
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
 });
 
 startCallerService();
