@@ -17,13 +17,28 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
 
 const twilioClient = process.env.TWILIO_ACCOUNT_SID ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
 
-function makeCall(phoneNumber, medicineName, uid) {
+async function makeCall(phoneNumber, medicineName, uid) {
     if (!twilioClient) {
         console.warn('Twilio not configured, skipping call.');
         return;
     }
+
+    let lang = 'en';
+    try {
+        if (admin.apps.length) {
+            const db = admin.firestore();
+            const profileDoc = await db.collection('users').doc(uid).collection('profile').doc('data').get();
+            if (profileDoc.exists) {
+                const pref = profileDoc.data().preferredLanguage;
+                if (pref === 'hi') lang = 'hi';
+                else if (pref === 'mr') lang = 'mr';
+            }
+        }
+    } catch (err) {
+        console.error('Error fetching preferredLanguage:', err);
+    }
     
-    const url = `${process.env.SERVER_URL || 'http://localhost:3000'}/call/start?medicineName=${encodeURIComponent(medicineName)}&uid=${encodeURIComponent(uid)}`;
+    const url = `${process.env.SERVER_URL || 'http://localhost:3000'}/call/start?medicineName=${encodeURIComponent(medicineName)}&uid=${encodeURIComponent(uid)}&lang=${lang}`;
 
     twilioClient.calls.create({
         url: url,

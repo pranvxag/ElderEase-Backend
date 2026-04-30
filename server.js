@@ -22,6 +22,53 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
+function getCallContent(lang, type, medicineName = '') {
+    let voice = 'Polly.Joanna';
+    let language = 'en-US';
+
+    if (lang === 'hi' || lang === 'mr') {
+        voice = 'Polly.Aditi';
+        language = 'hi-IN';
+    }
+
+    const messages = {
+        medicine: {
+            en: `Hello! This is ElderEase. It is time for your ${medicineName}. Press 1 if you have taken it. Press 2 if you have not.`,
+            hi: `नमस्ते! यह ElderEase है। ${medicineName} लेने का समय हो गया है। अगर आपने ले लिया तो 1 दबाएं। नहीं लिया तो 2 दबाएं।`,
+            mr: `नमस्कार! हे ElderEase आहे। ${medicineName} घेण्याची वेळ झाली आहे। घेतली असेल तर 1 दाबा। नाही घेतली तर 2 दाबा।`
+        },
+        sugar: {
+            en: `Hello! Have you checked your blood sugar today?`,
+            hi: `नमस्ते! क्या आपने आज अपना ब्लड शुगर चेक किया?`,
+            mr: `नमस्कार! तुम्ही आज रक्तातील साखर तपासली का?`
+        },
+        workout: {
+            en: `Hello! How are you feeling after your workout today?`,
+            hi: `नमस्ते! आज व्यायाम के बाद आप कैसा महसूस कर रहे हैं?`,
+            mr: `नमस्कार! आज व्यायामानंतर तुम्हाला कसे वाटत आहे?`
+        },
+        taken: {
+            en: `Thank you for taking your medicine. Stay healthy!`,
+            hi: `दवाई लेने के लिए धन्यवाद। स्वस्थ रहें!`,
+            mr: `औषध घेतल्याबद्दल धन्यवाद। निरोगी राहा!`
+        },
+        not_taken: {
+            en: `Please take your medicine soon. I will check on you in 15 minutes.`,
+            hi: `कृपया जल्द दवाई लें। मैं 15 मिनट में फिर कॉल करूंगा।`,
+            mr: `कृपया लवकर औषध घ्या। मी 15 मिनिटांत पुन्हा कॉल करेन।`
+        },
+        no_input: {
+            en: `I did not get a response. Your caregiver will be notified.`,
+            hi: `मुझे कोई जवाब नहीं मिला। आपके केयरगिवर को सूचित किया जाएगा।`,
+            mr: `मला काही उत्तर मिळाले नाही। तुमच्या काळजीवाहकाला कळवले जाईल।`
+        }
+    };
+
+    const message = messages[type]?.[lang] || messages[type]?.['en'] || '';
+
+    return { message, voice, language };
+}
+
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
@@ -33,13 +80,16 @@ app.get('/health', (req, res) => {
 app.post('/call/start', (req, res) => {
     const medicineName = req.query.medicineName || 'your medicine';
     const uid = req.query.uid;
+    const lang = req.query.lang || 'en';
+    
+    const callContent = getCallContent(lang, 'medicine', medicineName);
     
     const twiml = `
         <Response>
-            <Gather input="dtmf" action="/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}" numDigits="1" timeout="5">
-                <Say>Hello! This is ElderEase reminding you to take your ${medicineName}. Press 1 if taken. Press 2 if not taken.</Say>
+            <Gather input="dtmf" action="/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}" numDigits="1" timeout="5">
+                <Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say>
             </Gather>
-            <Redirect>/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}</Redirect>
+            <Redirect>/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}</Redirect>
         </Response>
     `;
     res.type('text/xml');
@@ -92,30 +142,37 @@ app.post('/call/ivr-response', async (req, res) => {
     const { Digits } = req.body;
     const medicineName = req.query.medicineName || 'your medicine';
     const uid = req.query.uid;
+    const lang = req.query.lang || 'en';
     
-    let twimlResponse = '<Response><Say>Goodbye.</Say></Response>';
+    let callContent;
 
     if (Digits === '1') {
-        twimlResponse = '<Response><Say>Thank you for taking your medicine. Have a great day!</Say></Response>';
+        callContent = getCallContent(lang, 'taken', medicineName);
         await sendCaregiverSMS(uid, medicineName, 'taken');
     } else if (Digits === '2') {
         scheduleCallback(uid, medicineName, 15);
-        twimlResponse = '<Response><Say>I will call you back in 15 minutes. Please remember to take your medicine.</Say></Response>';
+        callContent = getCallContent(lang, 'not_taken', medicineName);
         await sendCaregiverSMS(uid, medicineName, 'not taken');
     } else {
         // No input
+        callContent = getCallContent(lang, 'no_input', medicineName);
         await sendCaregiverSMS(uid, medicineName, 'no response');
     }
+    
+    const twimlResponse = `<Response><Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say></Response>`;
     
     res.type('text/xml');
     res.send(twimlResponse);
 });
 
 app.post('/call/sugar-check', (req, res) => {
+    const lang = req.query.lang || 'en';
+    const callContent = getCallContent(lang, 'sugar');
+
     const twiml = `
         <Response>
-            <Gather input="speech" action="/call/sugar-response" timeout="5">
-                <Say>Hello! This is ElderEase reminding you to check your blood sugar. What is your reading?</Say>
+            <Gather input="speech" action="/call/sugar-response?lang=${lang}" timeout="5">
+                <Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say>
             </Gather>
         </Response>
     `;
@@ -124,10 +181,13 @@ app.post('/call/sugar-check', (req, res) => {
 });
 
 app.post('/call/workout', (req, res) => {
+    const lang = req.query.lang || 'en';
+    const callContent = getCallContent(lang, 'workout');
+
     const twiml = `
         <Response>
-            <Gather input="speech" action="/call/workout-response" timeout="5">
-                <Say>Hello from ElderEase! You just finished your workout. How are you feeling?</Say>
+            <Gather input="speech" action="/call/workout-response?lang=${lang}" timeout="5">
+                <Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say>
             </Gather>
         </Response>
     `;
