@@ -37,7 +37,7 @@ async function makeCall(phoneNumber, medicineName, uid) {
     } catch (err) {
         console.error('Error fetching preferredLanguage:', err);
     }
-    
+
     const url = `${process.env.SERVER_URL || 'http://localhost:3000'}/call/start?medicineName=${encodeURIComponent(medicineName)}&uid=${encodeURIComponent(uid)}&lang=${lang}`;
 
     twilioClient.calls.create({
@@ -46,66 +46,100 @@ async function makeCall(phoneNumber, medicineName, uid) {
         from: process.env.TWILIO_PHONE_NUMBER
     }).then(call => {
         console.log(`Call initiated to ${phoneNumber}, callSid: ${call.sid}`);
-        
+
         // After 30 sec check callSid status
         setTimeout(async () => {
-             try {
-                 const fetchedCall = await twilioClient.calls(call.sid).fetch();
-                 const status = fetchedCall.status;
-                 console.log(`Call status after 30s: ${status}`);
-                 
-                 if (['no-answer', 'busy', 'failed'].includes(status)) {
-                     await twilioClient.messages.create({
-                         body: `ElderEase Reminder: Time to take ${medicineName}.`,
-                         from: process.env.TWILIO_PHONE_NUMBER,
-                         to: phoneNumber
-                     });
-                     console.log(`Sent SMS reminder for ${medicineName} to ${phoneNumber}.`);
-                 }
-             } catch (err) {
-                 console.error(`Error checking call status for ${call.sid}:`, err);
-             }
+            try {
+                const fetchedCall = await twilioClient.calls(call.sid).fetch();
+                const status = fetchedCall.status;
+                console.log(`Call status after 30s: ${status}`);
+
+                if (['no-answer', 'busy', 'failed'].includes(status)) {
+                    await twilioClient.messages.create({
+                        body: `ElderEase Reminder: Time to take ${medicineName}.`,
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        to: phoneNumber
+                    });
+                    console.log(`Sent SMS reminder for ${medicineName} to ${phoneNumber}.`);
+                }
+            } catch (err) {
+                console.error(`Error checking call status for ${call.sid}:`, err);
+            }
         }, 30 * 1000);
-        
+
         // NEW logic: 30 mins check
         setTimeout(async () => {
-             try {
-                 if (!admin.apps.length) return;
-                 const db = admin.firestore();
-                 const today = new Date().toISOString().split('T')[0];
-                 
-                 let isPending = false;
-                 
-                 // Check medicinelogs/{today}
-                 const logDoc = await db.collection('medicinelogs').doc(today).get();
-                 if (logDoc.exists) {
-                     const data = logDoc.data();
-                     if (data.status === 'pending') isPending = true;
-                     else if (data[uid] && data[uid].status === 'pending') isPending = true;
-                     else if (data[uid] && data[uid][medicineName] && data[uid][medicineName].status === 'pending') isPending = true;
-                     else if (Array.isArray(data.logs)) {
-                         const log = data.logs.find(l => l.uid === uid && (l.medicineName === medicineName || l.medicine === medicineName));
-                         if (log && log.status === 'pending') isPending = true;
-                     }
-                 }
-                 
-                 // Fallback check
-                 const userLogDoc = await db.collection('users').doc(uid).collection('medicinelogs').doc(today).get();
-                 if (userLogDoc.exists && userLogDoc.data().status === 'pending') {
-                     isPending = true;
-                 }
-                 
-                 if (isPending) {
-                     console.log(`Log status still pending after 30 mins for ${uid}. Sending no response SMS.`);
-                     await sendCaregiverSMS(uid, medicineName, 'no response');
-                 }
-             } catch (err) {
-                 console.error(`Error checking log status after 30 mins for ${call.sid}:`, err);
-             }
+            try {
+                if (!admin.apps.length) return;
+                const db = admin.firestore();
+                const today = new Date().toISOString().split('T')[0];
+
+                let isPending = false;
+
+                // Check medicinelogs/{today}
+                const logDoc = await db.collection('medicinelogs').doc(today).get();
+                if (logDoc.exists) {
+                    const data = logDoc.data();
+                    if (data.status === 'pending') isPending = true;
+                    else if (data[uid] && data[uid].status === 'pending') isPending = true;
+                    else if (data[uid] && data[uid][medicineName] && data[uid][medicineName].status === 'pending') isPending = true;
+                    else if (Array.isArray(data.logs)) {
+                        const log = data.logs.find(l => l.uid === uid && (l.medicineName === medicineName || l.medicine === medicineName));
+                        if (log && log.status === 'pending') isPending = true;
+                    }
+                }
+
+                // Fallback check
+                const userLogDoc = await db.collection('users').doc(uid).collection('medicinelogs').doc(today).get();
+                if (userLogDoc.exists && userLogDoc.data().status === 'pending') {
+                    isPending = true;
+                }
+
+                if (isPending) {
+                    console.log(`Log status still pending after 30 mins for ${uid}. Sending no response SMS.`);
+                    await sendCaregiverSMS(uid, medicineName, 'no response');
+                }
+            } catch (err) {
+                console.error(`Error checking log status after 30 mins for ${call.sid}:`, err);
+            }
         }, 30 * 60 * 1000);
-        
+
     }).catch(err => {
         console.error(`Error initiating call to ${phoneNumber}:`, err);
+    });
+}
+
+async function makeSugarCall(phoneNumber, timeType, uid) {
+    if (!twilioClient) {
+        console.warn('Twilio not configured, skipping sugar call.');
+        return;
+    }
+
+    let lang = 'en';
+    try {
+        if (admin.apps.length) {
+            const db = admin.firestore();
+            const profileDoc = await db.collection('users').doc(uid).collection('profile').doc('data').get();
+            if (profileDoc.exists) {
+                const pref = profileDoc.data().preferredLanguage;
+                if (pref === 'hi') lang = 'hi';
+                else if (pref === 'mr') lang = 'mr';
+            }
+        }
+    } catch (err) {
+        console.error('Error fetching preferredLanguage for sugar call:', err);
+    }
+
+    const url = `${process.env.SERVER_URL || 'http://localhost:3000'}/call/start-sugar?timeType=${encodeURIComponent(timeType)}&uid=${encodeURIComponent(uid)}&lang=${lang}`;
+
+    twilioClient.calls.create({
+        url: url,
+        to: phoneNumber,
+        from: process.env.TWILIO_PHONE_NUMBER
+    }).then(call => {
+        console.log(`Sugar Call initiated to ${phoneNumber}, callSid: ${call.sid}`);
+    }).catch(err => {
+        console.error(`Error initiating sugar call to ${phoneNumber}:`, err);
     });
 }
 
@@ -117,30 +151,46 @@ async function sendCaregiverSMS(uid, medicineName, status) {
         if (userDoc.exists) {
             const userData = userDoc.data();
             const elderName = userData.displayName || 'The elder';
+            const userPhone = userData.phoneNumber;
             const contacts = userData.emergencyContacts || [];
+
+            let messageBodyCaregiver = '';
+            let messageBodyUser = '';
+
+            if (status === 'taken') {
+                messageBodyCaregiver = `ElderEase: ${elderName} has taken their ${medicineName}.`;
+                messageBodyUser = `ElderEase: You have successfully logged taking your ${medicineName}.`;
+            } else if (status === 'not taken') {
+                messageBodyCaregiver = `ElderEase: ${elderName} has NOT taken their ${medicineName}.`;
+                messageBodyUser = `ElderEase: You have marked your ${medicineName} as not taken. We will remind you later.`;
+            } else if (status === 'no response') {
+                messageBodyCaregiver = `ElderEase: ${elderName} did not respond to the reminder.`;
+                messageBodyUser = `ElderEase: We missed you for your ${medicineName} reminder.`;
+            }
+
             if (contacts.length > 0 && contacts[0].phone) {
                 const caregiverPhone = contacts[0].phone;
-                let messageBody = '';
-                if (status === 'taken') {
-                    messageBody = `ElderEase: ${elderName} has taken their ${medicineName}.`;
-                } else if (status === 'not taken') {
-                    messageBody = `ElderEase: ${elderName} has NOT taken their ${medicineName}.`;
-                } else if (status === 'no response') {
-                    messageBody = `ElderEase: ${elderName} did not respond to the reminder.`;
-                }
-                
-                if (messageBody) {
+                if (messageBodyCaregiver) {
                     await twilioClient.messages.create({
-                        body: messageBody,
+                        body: messageBodyCaregiver,
                         from: process.env.TWILIO_PHONE_NUMBER,
                         to: caregiverPhone
                     });
                     console.log(`Caregiver SMS sent for ${elderName} (${status})`);
                 }
             }
+
+            if (userPhone && messageBodyUser) {
+                await twilioClient.messages.create({
+                    body: messageBodyUser,
+                    from: process.env.TWILIO_PHONE_NUMBER,
+                    to: userPhone
+                });
+                console.log(`User SMS sent for ${elderName} (${status})`);
+            }
         }
     } catch (err) {
-        console.error('Error sending caregiver SMS:', err);
+        console.error('Error sending SMS notifications:', err);
     }
 }
 
@@ -150,7 +200,7 @@ function scheduleCallback(uid, medicineName, minutes) {
             if (!admin.apps.length) return;
             const db = admin.firestore();
             const userDoc = await db.collection('users').doc(uid).collection('profile').doc('data').get();
-            
+
             if (userDoc.exists) {
                 const phoneNumber = userDoc.data().phoneNumber;
                 if (phoneNumber) {
@@ -167,7 +217,7 @@ function scheduleCallback(uid, medicineName, minutes) {
 async function generateWeeklyReport(uid) {
     if (!admin.apps.length || !twilioClient) return null;
     const db = admin.firestore();
-    
+
     const todayDate = new Date();
     const dates = [];
     for (let i = 6; i >= 0; i--) {
@@ -210,7 +260,7 @@ async function generateWeeklyReport(uid) {
                     }
                 }
             }
-            
+
             // Sugar logs
             const sugarLogDoc = await db.collection('users').doc(uid).collection('sugarlogs').doc(date).get();
             let hasSugarReading = false;
@@ -226,7 +276,7 @@ async function generateWeeklyReport(uid) {
                     eveningSugarCount++;
                     hasSugarReading = true;
                 }
-                
+
                 if (Array.isArray(sugarData.readings)) {
                     for (const reading of sugarData.readings) {
                         if (reading.time === 'morning' || reading.type === 'morning') {
@@ -245,11 +295,11 @@ async function generateWeeklyReport(uid) {
                 missingSugarDays++;
             }
         }
-        
+
         let adherence = totalScheduled > 0 ? Math.round((totalTaken / totalScheduled) * 100) : 0;
         let avgMorning = morningSugarCount > 0 ? Math.round(morningSugarSum / morningSugarCount) : 0;
         let avgEvening = eveningSugarCount > 0 ? Math.round(eveningSugarSum / eveningSugarCount) : 0;
-        
+
         const reportText = `ElderEase Weekly Report - ${elderName}\nPeriod: ${startDate} to ${endDate}\n\nMEDICINES:\nTaken: ${totalTaken} | Missed: ${totalMissed} | Adherence: ${adherence}%\n\nSUGAR LEVELS (avg):\nMorning: ${avgMorning > 0 ? avgMorning : 'N/A'} mg/dL | Evening: ${avgEvening > 0 ? avgEvening : 'N/A'} mg/dL\n\nGenerated by ElderEase`;
 
         await db.collection('users').doc(uid).collection('reports').doc(endDate).set({
@@ -290,7 +340,7 @@ async function generateWeeklyReport(uid) {
 
 function startCallerService() {
     console.log('Caller Service started...');
-    
+
     // node-cron every Sunday at 9:00 AM for weekly reports
     cron.schedule('0 9 * * 0', async () => {
         console.log('Running weekly report cron job...');
@@ -312,34 +362,34 @@ function startCallerService() {
         const hours = String(now.getHours()).padStart(2, '0');
         const minutes = String(now.getMinutes()).padStart(2, '0');
         const currentTime = `${hours}:${minutes}`;
-        
+
         console.log(`Cron triggered at ${currentTime}, checking medicines...`);
-        
+
         try {
             if (!admin.apps.length) {
                 console.warn('Firebase admin not initialized, skipping cron task');
                 return;
             }
-            
+
             const db = admin.firestore();
             const usersSnapshot = await db.collection('users').get();
-            
+
             for (const userDoc of usersSnapshot.docs) {
                 const uid = userDoc.id;
                 const profileDataDoc = await db.collection('users').doc(uid).collection('profile').doc('data').get();
-                
+
                 if (profileDataDoc.exists) {
                     const userData = profileDataDoc.data();
                     const phoneNumber = userData.phoneNumber;
                     const medicines = userData.medicines || []; // expected: [{ name: "Aspirin", times: ["08:00", "20:00"] }]
-                    
+
                     if (phoneNumber && Array.isArray(medicines)) {
                         medicines.forEach(medicine => {
                             if (Array.isArray(medicine.times) && medicine.times.includes(currentTime)) {
                                 const medName = medicine.name || 'your medicine';
                                 console.log(`Match found! Calling ${phoneNumber} for ${medName}`);
                                 makeCall(phoneNumber, medName, uid);
-                                
+
                                 // Send push notification
                                 if (userData.expoPushToken) {
                                     fetch('https://exp.host/--/api/v2/push/send', {
@@ -355,15 +405,25 @@ function startCallerService() {
                                             body: `Time to take ${medName}`
                                         })
                                     }).then(res => res.json())
-                                      .then(data => console.log(`Push notification sent to ${uid}:`, data))
-                                      .catch(err => console.error(`Error sending push notification to ${uid}:`, err));
+                                        .then(data => console.log(`Push notification sent to ${uid}:`, data))
+                                        .catch(err => console.error(`Error sending push notification to ${uid}:`, err));
                                 }
+                            }
+                        });
+                    }
+
+                    const sugarTimes = userData.sugarTimes || [];
+                    if (phoneNumber && Array.isArray(sugarTimes)) {
+                        sugarTimes.forEach(st => {
+                            if (st.time === currentTime) {
+                                console.log(`Match found! Calling ${phoneNumber} for sugar test (${st.type})`);
+                                makeSugarCall(phoneNumber, st.type, uid);
                             }
                         });
                     }
                 }
             }
-            
+
         } catch (err) {
             console.error('Error reading Firestore users:', err);
         }

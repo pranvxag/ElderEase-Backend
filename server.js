@@ -61,6 +61,21 @@ function getCallContent(lang, type, medicineName = '') {
             en: `I did not get a response. Your caregiver will be notified.`,
             hi: `मुझे कोई जवाब नहीं मिला। आपके केयरगिवर को सूचित किया जाएगा।`,
             mr: `मला काही उत्तर मिळाले नाही। तुमच्या काळजीवाहकाला कळवले जाईल।`
+        },
+        sugar_morning: {
+            en: `Hello! This is ElderEase. Please enter your fasting blood sugar level using the keypad, followed by the hash key.`,
+            hi: `नमस्ते! यह ElderEase है। कृपया कीपैड का उपयोग करके अपना खाली पेट का ब्लड शुगर लेवल दर्ज करें, और फिर हैश कुंजी दबाएं।`,
+            mr: `नमस्कार! हे ElderEase आहे। कृपया कीपॅड वापरून तुमची उपाशीपोटी रक्तातील साखरेची पातळी प्रविष्ट करा आणि नंतर हॅश की दाबा।`
+        },
+        sugar_evening: {
+            en: `Hello! This is ElderEase. Please enter your after-lunch blood sugar level using the keypad, followed by the hash key.`,
+            hi: `नमस्ते! यह ElderEase है। कृपया कीपैड का उपयोग करके अपने दोपहर के भोजन के बाद का ब्लड शुगर लेवल दर्ज करें, और फिर हैश कुंजी दबाएं।`,
+            mr: `नमस्कार! हे ElderEase आहे। कृपया कीपॅड वापरून तुमच्या दुपारच्या जेवणानंतरची रक्तातील साखरेची पातळी प्रविष्ट करा आणि नंतर हॅश की दाबा।`
+        },
+        sugar_saved: {
+            en: `Thank you. Your blood sugar level has been saved.`,
+            hi: `धन्यवाद। आपका ब्लड शुगर लेवल सेव कर लिया गया है।`,
+            mr: `धन्यवाद। तुमची रक्तातील साखरेची पातळी सेव्ह केली आहे।`
         }
     };
 
@@ -165,19 +180,71 @@ app.post('/call/ivr-response', async (req, res) => {
     res.send(twimlResponse);
 });
 
-app.post('/call/sugar-check', (req, res) => {
+app.post('/call/start-sugar', (req, res) => {
+    const timeType = req.query.timeType || 'morning';
+    const uid = req.query.uid;
     const lang = req.query.lang || 'en';
-    const callContent = getCallContent(lang, 'sugar');
-
+    
+    const callContent = getCallContent(lang, `sugar_${timeType}`);
+    
     const twiml = `
         <Response>
-            <Gather input="speech" action="/call/sugar-response?lang=${lang}" timeout="5">
+            <Gather input="dtmf" action="/call/sugar-ivr-response?timeType=${encodeURIComponent(timeType)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}" finishOnKey="#" timeout="10">
                 <Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say>
             </Gather>
+            <Redirect>/call/start-sugar?timeType=${encodeURIComponent(timeType)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}</Redirect>
         </Response>
     `;
     res.type('text/xml');
     res.send(twiml);
+});
+
+app.post('/call/sugar-ivr-response', async (req, res) => {
+    const { Digits } = req.body;
+    const timeType = req.query.timeType || 'morning';
+    const uid = req.query.uid;
+    const lang = req.query.lang || 'en';
+    
+    if (Digits) {
+        try {
+            const admin = require('firebase-admin');
+            if (admin.apps.length && uid) {
+                const db = admin.firestore();
+                const today = new Date().toISOString().split('T')[0];
+                const sugarRef = db.collection('users').doc(uid).collection('sugarlogs').doc(today);
+                
+                await db.runTransaction(async (t) => {
+                    const doc = await t.get(sugarRef);
+                    if (!doc.exists) {
+                        t.set(sugarRef, {
+                            [timeType]: Digits,
+                            readings: [{ type: timeType, value: Digits, timestamp: admin.firestore.FieldValue.serverTimestamp() }]
+                        });
+                    } else {
+                        const data = doc.data();
+                        const readings = data.readings || [];
+                        readings.push({ type: timeType, value: Digits, timestamp: admin.firestore.FieldValue.serverTimestamp() });
+                        t.update(sugarRef, {
+                            [timeType]: Digits,
+                            readings: readings
+                        });
+                    }
+                });
+                console.log(`Saved sugar level ${Digits} for ${uid} at ${timeType}`);
+            }
+        } catch (err) {
+            console.error('Error saving sugar level:', err);
+        }
+        
+        const callContent = getCallContent(lang, 'sugar_saved');
+        const twimlResponse = `<Response><Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say></Response>`;
+        res.type('text/xml');
+        res.send(twimlResponse);
+    } else {
+        const twimlResponse = `<Response><Say>No input received. Goodbye.</Say></Response>`;
+        res.type('text/xml');
+        res.send(twimlResponse);
+    }
 });
 
 app.post('/call/workout', (req, res) => {
@@ -195,11 +262,7 @@ app.post('/call/workout', (req, res) => {
     res.send(twiml);
 });
 
-// Mock endpoints for the ones required above
-app.post('/call/sugar-response', (req, res) => {
-    res.type('text/xml');
-    res.send('<Response><Say>Noted. Have a good day!</Say></Response>');
-});
+// Note: Sugar response is now handled by /call/sugar-ivr-response
 
 app.post('/call/workout-response', (req, res) => {
     res.type('text/xml');
