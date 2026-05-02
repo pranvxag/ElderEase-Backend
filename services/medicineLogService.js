@@ -22,17 +22,11 @@ async function getUserProfile(uid) {
     }
 
     const db = admin.firestore();
-    const fallbackProfileRef = db.collection('users').doc(uid).collection('profile').doc('data');
-    const directProfileRef = db.doc(`users/${uid}/profile`);
+    const profileRef = db.collection('users').doc(uid).collection('profile').doc('data');
 
-    const directSnap = await directProfileRef.get();
-    if (directSnap.exists) {
-        return directSnap.data();
-    }
-
-    const fallbackSnap = await fallbackProfileRef.get();
-    if (fallbackSnap.exists) {
-        return fallbackSnap.data();
+    const snap = await profileRef.get();
+    if (snap.exists) {
+        return snap.data();
     }
 
     return null;

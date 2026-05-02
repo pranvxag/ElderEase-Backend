@@ -54,7 +54,7 @@ async function checkAndTriggerReminders() {
     const ist = toIST(now);
     const today = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
 
-    console.log(`[Medicine Reminder] ⏰ Cron tick at ${now.toISOString()} | checking ${currentTime} / ${previousTime}`);
+    console.log(`[Medicine Reminder] ⏰ Cron tick | IST date=${today} time=${currentTime} / ${previousTime}`);
 
     if (!admin.apps.length) {
         console.warn('[Medicine Reminder] ⚠️ Firebase admin not initialized, skipping');
