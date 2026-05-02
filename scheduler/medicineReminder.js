@@ -3,8 +3,15 @@ const admin = require('firebase-admin');
 const { triggerMedicineReminderCall } = require('../calls/medicineReminderCall');
 const { updateMedicineEntryStatus, formatReminderTime } = require('../services/medicineLogService');
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+
+function toIST(date = new Date()) {
+    return new Date(date.getTime() + IST_OFFSET_MS);
+}
+
 function getCurrentTimeKey(date = new Date()) {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const ist = toIST(date);
+    return `${String(ist.getUTCHours()).padStart(2, '0')}:${String(ist.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 function getPreviousTimeKey(date = new Date()) {
@@ -44,7 +51,8 @@ async function checkAndTriggerReminders() {
     const now = new Date();
     const currentTime = getCurrentTimeKey(now);
     const previousTime = getPreviousTimeKey(now);
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const ist = toIST(now);
+    const today = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
 
     console.log(`[Medicine Reminder] ⏰ Cron tick at ${now.toISOString()} | checking ${currentTime} / ${previousTime}`);
 
@@ -55,8 +63,8 @@ async function checkAndTriggerReminders() {
 
     const db = admin.firestore();
     const userRefs = await db.collection('users').listDocuments();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+    const yesterdayIST = new Date(ist.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayKey = `${yesterdayIST.getUTCFullYear()}-${String(yesterdayIST.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterdayIST.getUTCDate()).padStart(2, '0')}`;
 
     console.log(`[Medicine Reminder] 👥 Found ${userRefs.length} users to scan`);
 
