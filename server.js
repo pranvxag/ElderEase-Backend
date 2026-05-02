@@ -1,4 +1,12 @@
 require('dotenv').config();
+const admin = require('firebase-admin');
+const serviceAccount = require('./firebase-admin-key.json');
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+    });
+}
+
 const express = require('express');
 const fetch = require('node-fetch');
 const { startCallerService, scheduleCallback, sendCaregiverSMS, generateWeeklyReport } = require('./services/callerService');
@@ -97,9 +105,9 @@ app.post('/call/start', (req, res) => {
     const medicineName = req.query.medicineName || 'your medicine';
     const uid = req.query.uid;
     const lang = req.query.lang || 'en';
-    
+
     const callContent = getCallContent(lang, 'medicine', medicineName);
-    
+
     const twiml = `
         <Response>
             <Gather input="dtmf" action="/call/ivr-response?medicineName=${encodeURIComponent(medicineName)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}" numDigits="1" timeout="5">
@@ -116,7 +124,7 @@ app.post('/call/response', async (req, res) => {
     const { SpeechResult } = req.body;
     const medicineName = req.query.medicineName;
     const uid = req.query.uid;
-    
+
     let twimlResponse = '<Response><Say>I did not catch that. Please try again later.</Say></Response>';
 
     if (SpeechResult) {
@@ -134,10 +142,10 @@ app.post('/call/response', async (req, res) => {
                 ],
                 model: "llama-3.3-70b-versatile",
             });
-            
+
             const reply = chatCompletion.choices[0]?.message?.content || 'Thank you.';
             const lowerSpeech = SpeechResult.toLowerCase();
-            
+
             if (lowerSpeech.includes('later') || lowerSpeech.includes('15') || lowerSpeech.includes('wait')) {
                 scheduleCallback(uid, medicineName, 15);
                 twimlResponse = `<Response><Say>${reply} I will call you back in 15 minutes.</Say></Response>`;
@@ -149,7 +157,7 @@ app.post('/call/response', async (req, res) => {
             twimlResponse = '<Response><Say>Sorry, I encountered an issue.</Say></Response>';
         }
     }
-    
+
     res.type('text/xml');
     res.send(twimlResponse);
 });
@@ -159,7 +167,7 @@ app.post('/call/ivr-response', async (req, res) => {
     const medicineName = req.query.medicineName || 'your medicine';
     const uid = req.query.uid;
     const lang = req.query.lang || 'en';
-    
+
     let callContent;
 
     if (Digits === '1') {
@@ -174,9 +182,9 @@ app.post('/call/ivr-response', async (req, res) => {
         callContent = getCallContent(lang, 'no_input', medicineName);
         await sendCaregiverSMS(uid, medicineName, 'no response');
     }
-    
+
     const twimlResponse = `<Response><Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say></Response>`;
-    
+
     res.type('text/xml');
     res.send(twimlResponse);
 });
@@ -185,9 +193,9 @@ app.post('/call/start-sugar', (req, res) => {
     const timeType = req.query.timeType || 'morning';
     const uid = req.query.uid;
     const lang = req.query.lang || 'en';
-    
+
     const callContent = getCallContent(lang, `sugar_${timeType}`);
-    
+
     const twiml = `
         <Response>
             <Gather input="dtmf" action="/call/sugar-ivr-response?timeType=${encodeURIComponent(timeType)}&amp;uid=${encodeURIComponent(uid)}&amp;lang=${lang}" finishOnKey="#" timeout="10">
@@ -205,7 +213,7 @@ app.post('/call/sugar-ivr-response', async (req, res) => {
     const timeType = req.query.timeType || 'morning';
     const uid = req.query.uid;
     const lang = req.query.lang || 'en';
-    
+
     if (Digits) {
         try {
             const admin = require('firebase-admin');
@@ -213,7 +221,7 @@ app.post('/call/sugar-ivr-response', async (req, res) => {
                 const db = admin.firestore();
                 const today = new Date().toISOString().split('T')[0];
                 const sugarRef = db.collection('users').doc(uid).collection('sugarlogs').doc(today);
-                
+
                 await db.runTransaction(async (t) => {
                     const doc = await t.get(sugarRef);
                     if (!doc.exists) {
@@ -236,7 +244,7 @@ app.post('/call/sugar-ivr-response', async (req, res) => {
         } catch (err) {
             console.error('Error saving sugar level:', err);
         }
-        
+
         const callContent = getCallContent(lang, 'sugar_saved');
         const twimlResponse = `<Response><Say voice="${callContent.voice}" language="${callContent.language}">${callContent.message}</Say></Response>`;
         res.type('text/xml');
