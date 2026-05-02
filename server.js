@@ -22,6 +22,8 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { startCallerService, scheduleCallback, sendCaregiverSMS, generateWeeklyReport } = require('./services/callerService');
 const { startEmergencyListener } = require('./services/emergencyListener');
+const ivrMedicineRoutes = require('./routes/ivrMedicine');
+const medicineReminderScheduler = require('./scheduler/medicineReminder');
 const Groq = require('groq-sdk');
 
 const app = express();
@@ -29,6 +31,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/', ivrMedicineRoutes);
 
 // Self ping every 14 mins to https://eldereaseapp.onrender.com/ping
 setInterval(() => {
@@ -306,6 +309,7 @@ app.get('/report/:uid', async (req, res) => {
 
 startCallerService();
 startEmergencyListener();
+medicineReminderScheduler.start();
 
 app.listen(PORT, () => {
     console.log(`ElderEase Server running on port ${PORT}`);
