@@ -103,10 +103,9 @@ function setupListener() {
 
                                 // 5. Send SMS to all contacts
                                 let locationStr = "Location unavailable";
-                                let locationUrl = null;
                                 if (location && location.latitude && location.longitude) {
                                     locationStr = `Lat: ${location.latitude}, Long: ${location.longitude}`;
-                                    locationUrl = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+                                    // No Google Maps URL - carriers block it
                                 }
 
                                 let smsBody = `EMERGENCY ALERT\n`;
@@ -114,9 +113,6 @@ function setupListener() {
                                 smsBody += `User Phone: ${userPhone}\n`;
                                 smsBody += `Time: ${time} on ${date}\n`;
                                 smsBody += `Location: ${locationStr}\n`;
-                                if (locationUrl) {
-                                    smsBody += `Map: ${locationUrl}\n`;
-                                }
 
                                 if (doctorPhone) {
                                     smsBody += `Doctor: ${doctorPhone}\n`;
