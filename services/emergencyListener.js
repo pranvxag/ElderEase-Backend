@@ -37,6 +37,14 @@ function startEmergencyListener() {
                             });
 
                             const { userId, userName, userPhone, date, time, location } = eventData;
+                            if (!userId) {
+                                console.warn(`Event ${eventId} has no userId, skipping.`);
+                                await db.collection('emergencyEvents').doc(eventId).update({
+                                    callStatus: 'skipped',
+                                    skipReason: 'missing userId'
+                                });
+                                return;
+                            }
 
                             // 2. Fetch emergency contacts
                             const profileDoc = await db.collection('users').doc(userId).collection('profile').doc('data').get();
