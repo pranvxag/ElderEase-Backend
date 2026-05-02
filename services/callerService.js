@@ -4,16 +4,7 @@ const admin = require('firebase-admin');
 const fetch = require('node-fetch');
 
 // Ensure to handle the possibility of credentials not being set initially 
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    try {
-        const serviceAccount = require(`../${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-    } catch (err) {
-        console.error('Failed to initialize Firebase:', err);
-    }
-}
+
 
 const twilioClient = process.env.TWILIO_ACCOUNT_SID ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
 
