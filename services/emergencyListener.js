@@ -121,10 +121,15 @@ function setupListener() {
                                 smsBody += `Please respond immediately.`;
 
                                 console.log(`[Emergency] Sending SMS to ${contacts.length} contacts...`);
+                                console.log(`[Emergency] Using TWILIO_PHONE_NUMBER: ${process.env.TWILIO_PHONE_NUMBER}`);
 
                                 for (const contact of contacts) {
-                                    if (!contact.phone) continue;
+                                    if (!contact.phone) {
+                                        console.warn(`[Emergency] Skipping ${contact.name} - no phone number`);
+                                        continue;
+                                    }
                                     try {
+                                        console.log(`[Emergency] Attempting SMS to ${contact.name} at ${contact.phone}...`);
                                         await twilioClient.messages.create({
                                             body: smsBody,
                                             from: process.env.TWILIO_PHONE_NUMBER,
@@ -132,7 +137,7 @@ function setupListener() {
                                         });
                                         console.log(`[Emergency] ✅ Sent emergency SMS to ${contact.name} (${contact.phone})`);
                                     } catch (smsErr) {
-                                        console.error(`[Emergency] ❌ Failed to send SMS to ${contact.phone}:`, smsErr);
+                                        console.error(`[Emergency] ❌ Failed to send SMS to ${contact.phone}:`, smsErr.message);
                                     }
                                 }
                             }
