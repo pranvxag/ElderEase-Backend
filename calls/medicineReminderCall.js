@@ -25,6 +25,8 @@ async function triggerMedicineReminderCall(uid, entry) {
     const medicineName = entry.medicineName || 'your medicine';
     const logDate = entry.logDate || new Date().toISOString().split('T')[0];
 
+    console.log(`[Medicine Reminder] 📞 Creating Twilio call → phone=${phone} medicine=${medicineName} lang=${language} uid=${uid}`);
+
     await twilioClient.calls.create({
         to: phone,
         from: process.env.TWILIO_PHONE_NUMBER,
@@ -33,12 +35,7 @@ async function triggerMedicineReminderCall(uid, entry) {
         statusCallbackMethod: 'POST',
     });
 
-    console.log('Medicine reminder call triggered:', {
-        uid,
-        medicine: medicineName,
-        time: entry.reminderTime,
-        userName,
-    });
+    console.log(`[Medicine Reminder] ✅ Twilio call created for ${userName} (${phone}) — ${medicineName} [${language}]`);
 }
 
 module.exports = { triggerMedicineReminderCall };

@@ -67,6 +67,8 @@ async function handleMedicineReminder(req, res) {
     const logDate = req.query.logDate || req.body.logDate;
     const lang = req.query.lang || req.body.lang || 'en';
 
+    console.log(`[Medicine Reminder] 🌐 IVR /medicine-reminder hit → uid=${uid} medicine=${medicineName} lang=${lang}`);
+
     const twiml = buildPromptTwiml(uid, entryId, medicineName, logDate, lang);
     res.type('text/xml').send(twiml.toString());
 }
@@ -80,18 +82,23 @@ async function handleMedicineResponse(req, res) {
     const voiceLang = VOICE_LANG_MAP[lang] ?? 'en-IN';
     const digit = req.body.Digits;
 
+    console.log(`[Medicine Reminder] 🔢 IVR /medicine-response hit → uid=${uid} digit=${digit ?? 'none'} medicine=${medicineName} lang=${lang}`);
+
     const twiml = new twilio.twiml.VoiceResponse();
 
     if (digit === '1') {
         await updateMedicineEntryStatus(uid, entryId, 'taken', { logDate });
         await sendCaregiverSMS(uid, medicineName, 'taken');
         twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.taken[lang](medicineName));
+        console.log(`[Medicine Reminder] ✅ User ${uid} TOOK ${medicineName}`);
     } else if (digit === '2') {
         await scheduleSnoozedCall(uid, entryId, medicineName, 15, { logDate, lang });
         twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.snoozed[lang](medicineName));
+        console.log(`[Medicine Reminder] 😴 User ${uid} SNOOZED ${medicineName} — will retry in 15 min`);
     } else {
         await scheduleSnoozedCall(uid, entryId, medicineName, 15, { logDate, lang });
         twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.invalid[lang]());
+        console.log(`[Medicine Reminder] ❓ User ${uid} gave no/invalid input for ${medicineName} — will retry in 15 min`);
     }
 
     res.type('text/xml').send(twiml.toString());
@@ -105,7 +112,10 @@ async function handleCallStatus(req, res) {
     const lang = req.query.lang || req.body.lang || 'en';
     const callStatus = req.body.CallStatus;
 
+    console.log(`[Medicine Reminder] 📊 IVR /call-status hit → uid=${uid} status=${callStatus} medicine=${medicineName}`);
+
     if (['no-answer', 'busy', 'failed', 'canceled'].includes(callStatus)) {
+        console.log(`[Medicine Reminder] ⚠️ Call ${callStatus} for ${uid} — scheduling retry in 15 min`);
         await scheduleSnoozedCall(uid, entryId, medicineName, 15, { logDate, lang });
     }
 

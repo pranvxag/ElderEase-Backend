@@ -46,8 +46,10 @@ async function checkAndTriggerReminders() {
     const previousTime = getPreviousTimeKey(now);
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
+    console.log(`[Medicine Reminder] ⏰ Cron tick at ${now.toISOString()} | checking ${currentTime} / ${previousTime}`);
+
     if (!admin.apps.length) {
-        console.warn('Firebase admin not initialized, skipping medicine reminder check');
+        console.warn('[Medicine Reminder] ⚠️ Firebase admin not initialized, skipping');
         return;
     }
 
@@ -55,6 +57,10 @@ async function checkAndTriggerReminders() {
     const usersSnap = await db.collection('users').get();
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+    console.log(`[Medicine Reminder] 👥 Found ${usersSnap.size} users to scan`);
+
+    let triggeredCount = 0;
 
     for (const userDoc of usersSnap.docs) {
         const uid = userDoc.id;
@@ -66,14 +72,23 @@ async function checkAndTriggerReminders() {
             ...(previousLogSnap ? [{ logDate: yesterdayKey, entries: previousLogSnap.data()?.entries ?? [] }] : []),
         ];
 
+        const totalEntries = logsToScan.reduce((sum, l) => sum + l.entries.length, 0);
+        if (totalEntries > 0) {
+            console.log(`[Medicine Reminder] 📋 User ${uid}: ${totalEntries} entries to check`);
+        }
+
         for (const log of logsToScan) {
             for (const entry of log.entries) {
                 try {
-                    const shouldTrigger = shouldTriggerPendingEntry(entry, currentTime, previousTime) || shouldTriggerSnoozedEntry(entry, now);
+                    const isPending = shouldTriggerPendingEntry(entry, currentTime, previousTime);
+                    const isSnoozed = shouldTriggerSnoozedEntry(entry, now);
+                    const shouldTrigger = isPending || isSnoozed;
 
                     if (!shouldTrigger) {
                         continue;
                     }
+
+                    console.log(`[Medicine Reminder] 🔔 Triggering ${isPending ? 'PENDING' : 'SNOOZED'} reminder → uid=${uid} medicine=${entry.medicineName} time=${entry.reminderTime} lang=${entry.lang || 'auto'}`);
 
                     await updateMedicineEntryStatus(uid, entry.id, entry.status, {
                         logDate: log.logDate,
@@ -85,11 +100,17 @@ async function checkAndTriggerReminders() {
                         ...entry,
                         logDate: log.logDate,
                     });
+
+                    triggeredCount++;
                 } catch (error) {
-                    console.error('Error triggering medicine reminder for entry:', { uid, entryId: entry.id, error: error.message });
+                    console.error(`[Medicine Reminder] ❌ Error for uid=${uid} entryId=${entry.id}:`, error.message);
                 }
             }
         }
+    }
+
+    if (triggeredCount > 0) {
+        console.log(`[Medicine Reminder] ✅ Cron tick done — ${triggeredCount} reminder(s) triggered`);
     }
 }
 
@@ -107,7 +128,12 @@ function start() {
         });
     });
 
-    console.log('Medicine reminder scheduler started...');
+    // Heartbeat every 5 minutes so we can confirm it's alive on Render
+    setInterval(() => {
+        console.log('[Medicine Reminder] Scheduler heartbeat - still active ✅');
+    }, 5 * 60 * 1000);
+
+    console.log('[Medicine Reminder] Scheduler started ✅');
 }
 
 module.exports = {
