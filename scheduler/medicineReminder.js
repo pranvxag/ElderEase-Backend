@@ -54,16 +54,16 @@ async function checkAndTriggerReminders() {
     }
 
     const db = admin.firestore();
-    const usersSnap = await db.collection('users').get();
+    const userRefs = await db.collection('users').listDocuments();
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
 
-    console.log(`[Medicine Reminder] 👥 Found ${usersSnap.size} users to scan`);
+    console.log(`[Medicine Reminder] 👥 Found ${userRefs.length} users to scan`);
 
     let triggeredCount = 0;
 
-    for (const userDoc of usersSnap.docs) {
-        const uid = userDoc.id;
+    for (const userRef of userRefs) {
+        const uid = userRef.id;
         const currentLogSnap = await db.doc(`users/${uid}/medicinelogs/${today}`).get();
         const previousLogSnap = yesterdayKey === today ? null : await db.doc(`users/${uid}/medicinelogs/${yesterdayKey}`).get();
 
