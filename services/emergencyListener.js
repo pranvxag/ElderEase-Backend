@@ -102,23 +102,21 @@ function setupListener() {
                                 }
 
                                 // 5. Send SMS to all contacts
-                                let locationStr = "Location unavailable";
+                                let locationStr = "unavailable";
                                 if (location && location.latitude && location.longitude) {
-                                    locationStr = `Lat: ${location.latitude}, Long: ${location.longitude}`;
-                                    // No Google Maps URL - carriers block it
+                                    const lat = location.latitude.toFixed(5);
+                                    const lng = location.longitude.toFixed(5);
+                                    locationStr = `maps.google.com/?q=${lat},${lng}`;
                                 }
 
-                                let smsBody = `EMERGENCY ALERT\n`;
-                                smsBody += `${userName} needs help!\n`;
-                                smsBody += `User Phone: ${userPhone}\n`;
-                                smsBody += `Time: ${time} on ${date}\n`;
-                                smsBody += `Location: ${locationStr}\n`;
+                                let smsBody = `EMERGENCY: ${userName} needs help!\n`;
+                                smsBody += `Ph: ${userPhone}\n`;
+                                smsBody += `${time}\n`;
+                                smsBody += `${locationStr}`;
 
                                 if (doctorPhone) {
-                                    smsBody += `Doctor: ${doctorPhone}\n`;
+                                    smsBody += `\nDr: ${doctorPhone}`;
                                 }
-
-                                smsBody += `Please respond immediately.`;
 
                                 console.log(`[Emergency] Sending SMS to ${contacts.length} contacts...`);
                                 console.log(`[Emergency] Using TWILIO_PHONE_NUMBER: ${process.env.TWILIO_PHONE_NUMBER}`);
