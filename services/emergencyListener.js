@@ -5,13 +5,7 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID ? twilio(process.env.TWILIO_
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-function startEmergencyListener() {
-    console.log('Emergency Listener started...');
-
-    if (!admin.apps.length) {
-        console.warn('Firebase admin not initialized, Emergency Listener might fail if not initialized soon.');
-    }
-
+function setupListener() {
     try {
         const db = admin.firestore();
         console.log('Firestore instance created, setting up listener...');
@@ -152,7 +146,8 @@ function startEmergencyListener() {
                     }
                 });
             }, err => {
-                console.error('[Emergency] Error in snapshot listener:', err);
+                console.error('[Emergency] Snapshot error, reconnecting in 5s...', err);
+                setTimeout(() => setupListener(), 5000);
             });
 
         console.log('[Emergency] Listener is now watching emergencyEvents subcollections under all users...');
@@ -160,6 +155,22 @@ function startEmergencyListener() {
     } catch (err) {
         console.error('[Emergency] Failed to setup emergency listener:', err);
     }
+}
+
+function startEmergencyListener() {
+    console.log('Emergency Listener started...');
+
+    if (!admin.apps.length) {
+        console.warn('Firebase admin not initialized, Emergency Listener might fail if not initialized soon.');
+    }
+
+    // Setup the listener
+    setupListener();
+
+    // Add heartbeat
+    setInterval(() => {
+        console.log('[Emergency] Listener heartbeat - still active ✅');
+    }, 5 * 60 * 1000);
 }
 
 module.exports = { startEmergencyListener };
