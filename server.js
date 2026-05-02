@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fetch = require('node-fetch');
 const { startCallerService, scheduleCallback, sendCaregiverSMS, generateWeeklyReport } = require('./services/callerService');
+const { startEmergencyListener } = require('./services/emergencyListener');
 const Groq = require('groq-sdk');
 
 const app = express();
@@ -285,6 +286,7 @@ app.get('/report/:uid', async (req, res) => {
 });
 
 startCallerService();
+startEmergencyListener();
 
 app.listen(PORT, () => {
     console.log(`ElderEase Server running on port ${PORT}`);
