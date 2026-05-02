@@ -16,7 +16,7 @@ function startEmergencyListener() {
         const db = admin.firestore();
         console.log('Firestore instance created, setting up listener...');
 
-        db.collection('emergencyEvents')
+        db.collectionGroup('emergencyEvents')
             .where('callStatus', '==', 'pending')
             .onSnapshot(snapshot => {
                 // 🔍 Debug logs
@@ -30,6 +30,7 @@ function startEmergencyListener() {
 
                     if (change.type === 'added' || change.type === 'modified') {
                         const eventId = change.doc.id;
+                        const userId = change.doc.ref.parent.parent.id;
                         const eventData = change.doc.data();
 
                         // Double check status to avoid infinite loops
@@ -42,22 +43,12 @@ function startEmergencyListener() {
 
                         try {
                             // 1. Immediately update status to processing
-                            await db.collection('emergencyEvents').doc(eventId).update({
+                            await change.doc.ref.update({
                                 callStatus: 'processing'
                             });
                             console.log(`[Emergency] Event ${eventId} marked as processing`);
 
-                            const { userId, userName, userPhone, date, time, location } = eventData;
-
-                            // Guard: skip if userId is missing
-                            if (!userId) {
-                                console.warn(`[Emergency] Event ${eventId} has no userId, skipping.`);
-                                await db.collection('emergencyEvents').doc(eventId).update({
-                                    callStatus: 'skipped',
-                                    skipReason: 'missing userId'
-                                });
-                                return;
-                            }
+                            const { userName, userPhone, date, time, location } = eventData;
 
                             console.log(`[Emergency] Fetching contacts for userId: ${userId}`);
 
@@ -104,7 +95,7 @@ function startEmergencyListener() {
                                         console.log(`[Emergency] ✅ Initiated emergency call to ${contact.name} (${contact.phone})`);
 
                                         // Add to contactsNotified array
-                                        await db.collection('emergencyEvents').doc(eventId).update({
+                                        await change.doc.ref.update({
                                             contactsNotified: admin.firestore.FieldValue.arrayUnion(contact)
                                         });
                                     } catch (callErr) {
@@ -148,7 +139,7 @@ function startEmergencyListener() {
                             }
 
                             // 6. Update event to completed
-                            await db.collection('emergencyEvents').doc(eventId).update({
+                            await change.doc.ref.update({
                                 callStatus: 'completed',
                                 completedAt: new Date().toISOString()
                             });
@@ -164,7 +155,7 @@ function startEmergencyListener() {
                 console.error('[Emergency] Error in snapshot listener:', err);
             });
 
-        console.log('[Emergency] Listener is now watching emergencyEvents collection...');
+        console.log('[Emergency] Listener is now watching emergencyEvents subcollections under all users...');
 
     } catch (err) {
         console.error('[Emergency] Failed to setup emergency listener:', err);
