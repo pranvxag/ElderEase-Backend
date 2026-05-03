@@ -2,16 +2,14 @@ const cron = require('node-cron');
 const admin = require('firebase-admin');
 const { triggerMedicineReminderCall } = require('../calls/medicineReminderCall');
 const { updateMedicineEntryStatus, formatReminderTime } = require('../services/medicineLogService');
-
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+const { getIST, getTodayIST, getTimeIST } = require('../utils/istTime');
 
 function toIST(date = new Date()) {
-    return new Date(date.getTime() + IST_OFFSET_MS);
+    return getIST(date);
 }
 
 function getCurrentTimeKey(date = new Date()) {
-    const ist = toIST(date);
-    return `${String(ist.getUTCHours()).padStart(2, '0')}:${String(ist.getUTCMinutes()).padStart(2, '0')}`;
+    return getTimeIST(date);
 }
 
 function getPreviousTimeKey(date = new Date()) {
@@ -51,8 +49,9 @@ async function checkAndTriggerReminders() {
     const now = new Date();
     const currentTime = getCurrentTimeKey(now);
     const previousTime = getPreviousTimeKey(now);
-    const ist = toIST(now);
-    const today = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+    const today = getTodayIST(now);
+    const yesterdayDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayKey = getTodayIST(yesterdayDate);
 
     console.log(`[Medicine Reminder] ⏰ Cron tick | IST date=${today} time=${currentTime} / ${previousTime}`);
 
@@ -63,10 +62,6 @@ async function checkAndTriggerReminders() {
 
     const db = admin.firestore();
     const userRefs = await db.collection('users').listDocuments();
-    const yesterdayIST = new Date(ist.getTime() - 24 * 60 * 60 * 1000);
-    const yesterdayKey = `${yesterdayIST.getUTCFullYear()}-${String(yesterdayIST.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterdayIST.getUTCDate()).padStart(2, '0')}`;
-
-    console.log(`[Medicine Reminder] 👥 Found ${userRefs.length} users to scan`);
 
     let triggeredCount = 0;
 

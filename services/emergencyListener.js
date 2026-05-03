@@ -1,5 +1,7 @@
 const admin = require('firebase-admin');
 const twilio = require('twilio');
+const { getISOStringIST } = require('../utils/istTime');
+const { limitSmsText } = require('../utils/sms');
 
 const twilioClient = process.env.TWILIO_ACCOUNT_SID ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
 
@@ -109,14 +111,15 @@ function setupListener() {
                                     locationStr = `maps.google.com/?q=${lat},${lng}`;
                                 }
 
-                                let smsBody = `EMERGENCY: ${userName} needs help!\n`;
-                                smsBody += `Ph: ${userPhone}\n`;
-                                smsBody += `${time}\n`;
-                                smsBody += `${locationStr}`;
+                                let smsBody = `🆘 EMERGENCY! ${userName} needs help!\n`;
+                                smsBody += `📍 ${locationStr}\n`;
+                                smsBody += `🕐 ${time}`;
 
                                 if (doctorPhone) {
-                                    smsBody += `\nDr: ${doctorPhone}`;
+                                    smsBody += `\n👨‍⚕️ Dr: ${doctorPhone}`;
                                 }
+
+                                smsBody = limitSmsText(smsBody);
 
                                 console.log(`[Emergency] Sending SMS to ${contacts.length} contacts...`);
                                 console.log(`[Emergency] Using TWILIO_PHONE_NUMBER: ${process.env.TWILIO_PHONE_NUMBER}`);
@@ -143,7 +146,7 @@ function setupListener() {
                             // 6. Update event to completed
                             await change.doc.ref.update({
                                 callStatus: 'completed',
-                                completedAt: new Date().toISOString()
+                                completedAt: getISOStringIST()
                             });
 
                             console.log(`[Emergency] ✅ Event ${eventId} processed completely.`);

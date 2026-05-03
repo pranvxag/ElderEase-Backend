@@ -1,5 +1,6 @@
 const twilio = require('twilio');
 const { getUserProfile } = require('../services/medicineLogService');
+const { getTodayIST } = require('../utils/istTime');
 
 const twilioClient = process.env.TWILIO_ACCOUNT_SID
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
@@ -37,7 +38,7 @@ async function triggerMedicineReminderCall(uid, entry) {
 
     const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 3000}`;
     const medicineName = entry.medicineName || 'your medicine';
-    const logDate = entry.logDate || new Date().toISOString().split('T')[0];
+    const logDate = entry.logDate || getTodayIST();
 
     console.log(`[Medicine Reminder] 📞 Creating Twilio call → phone=${phone} medicine=${medicineName} lang=${language} uid=${uid}`);
 

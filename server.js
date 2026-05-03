@@ -1,5 +1,6 @@
 require('dotenv').config();
 const admin = require('firebase-admin');
+const { getTodayIST } = require('./utils/istTime');
 if (!admin.apps.length) {
     try {
         const serviceAccount = require(`./firebase-admin-key.json`);
@@ -22,6 +23,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { startCallerService, scheduleCallback, sendCaregiverSMS, generateWeeklyReport } = require('./services/callerService');
 const { startEmergencyListener } = require('./services/emergencyListener');
+const { startReportListener } = require('./scheduler/reportListener');
 const ivrMedicineRoutes = require('./routes/ivrMedicine');
 const medicineReminderScheduler = require('./scheduler/medicineReminder');
 const Groq = require('groq-sdk');
@@ -40,6 +42,8 @@ setInterval(() => {
         .then(text => console.log('Pinged self:', text))
         .catch(err => console.error('Ping failed:', err));
 }, 14 * 60 * 1000);
+
+startReportListener();
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
@@ -233,7 +237,7 @@ app.post('/call/sugar-ivr-response', async (req, res) => {
             const admin = require('firebase-admin');
             if (admin.apps.length && uid) {
                 const db = admin.firestore();
-                const today = new Date().toISOString().split('T')[0];
+                const today = getTodayIST();
                 const sugarRef = db.collection('users').doc(uid).collection('sugarlogs').doc(today);
 
                 await db.runTransaction(async (t) => {

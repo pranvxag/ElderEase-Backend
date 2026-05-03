@@ -1,19 +1,18 @@
 const admin = require('firebase-admin');
 const twilio = require('twilio');
+const { getTodayIST, getTimeIST, getISOStringIST, getFormattedTimeIST } = require('../utils/istTime');
+const { limitSmsText } = require('../utils/sms');
 
 const twilioClient = process.env.TWILIO_ACCOUNT_SID
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
 
 function getTodayKey(date = new Date()) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return getTodayIST(date);
 }
 
 function formatReminderTime(date = new Date()) {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    return getTimeIST(date);
 }
 
 async function getUserProfile(uid) {
@@ -52,7 +51,7 @@ async function updateMedicineEntryStatus(uid, entryId, status, extraFields = {})
             ...entry,
             ...entryFields,
             status,
-            updatedAt: new Date().toISOString(),
+            updatedAt: getISOStringIST(),
         };
     });
 
@@ -78,19 +77,18 @@ async function sendCaregiverSMS(uid, medicineName, status) {
         return;
     }
 
-    const timeStr = new Date().toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-    });
+    const timeStr = getFormattedTimeIST();
 
     const message = status === 'taken'
-        ? `ElderEase: ${userName} has taken their ${medicineName} at ${timeStr}. ✅`
-        : `ElderEase: ${userName} has NOT taken their ${medicineName} scheduled at ${timeStr}. Please check on them. ⚠️`;
+        ? `💊✅ ${userName} took ${medicineName} at ${timeStr}!`
+        : `⚠️ ${userName} MISSED ${medicineName} (${timeStr}). Check soon!`;
+
+    const smsBody = limitSmsText(message);
 
     await twilioClient.messages.create({
         to: caregiver.phone,
         from: process.env.TWILIO_PHONE_NUMBER,
-        body: message,
+        body: smsBody,
     });
 
     console.log('Caregiver SMS sent to:', caregiver.phone);
@@ -104,7 +102,7 @@ async function scheduleSnoozedCall(uid, entryId, medicineName, delayMinutes, ext
         logDate,
         lang,
         reminderTime: formatReminderTime(futureDate),
-        nextReminderAt: futureDate.toISOString(),
+        nextReminderAt: getISOStringIST(futureDate),
     });
 
     console.log(`Snoozed call scheduled for ${delayMinutes} min:`, {
