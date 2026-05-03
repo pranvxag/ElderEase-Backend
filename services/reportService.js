@@ -20,14 +20,14 @@ function buildSugarText(sugarData) {
     }
   }
 
-  // Post-meal data
+  // Post food data
   if (sugarData.postFood && sugarData.postFood.readings.length > 0) {
-    const a = sugarData.postFood;
-    if (a.readings.length === 1) {
-      parts.push(`🍽 Post Meal: ${a.readings[0].level}`);
+    const pf = sugarData.postFood;
+    if (pf.readings.length === 1) {
+      parts.push(`🍽 Post Meal: ${pf.readings[0].level}`);
     } else {
-      const timeStr = a.min.time ? ` (${a.min.time})` : '';
-      parts.push(`🍽 Post Meal: ${a.avg}(avg) | ↓${a.min.level}${timeStr} | ↑${a.max.level}`);
+      const timeStr = pf.min.time ? ` (${pf.min.time})` : '';
+      parts.push(`🍽 Post Meal: ${pf.avg}(avg) | ↓${pf.min.level}${timeStr} | ↑${pf.max.level}`);
     }
   }
 
@@ -70,11 +70,11 @@ function buildReportMessage(userName, adherence, sugar) {
   }
 
   if (sugar.postFood && sugar.postFood.readings.length > 0) {
-    const a = sugar.postFood;
-    if (a.readings.length === 1) {
-      addPartIfFits(`🍽 Post Meal: ${a.readings[0].level}`);
+    const pf = sugar.postFood;
+    if (pf.readings.length === 1) {
+      addPartIfFits(`🍽 Post Meal: ${pf.readings[0].level}`);
     } else {
-      addPartIfFits(`🍽 Post Meal: ${a.avg}(avg) | ↓${a.min.level} | ↑${a.max.level}`);
+      addPartIfFits(`🍽 Post Meal: ${pf.avg}(avg) | ↓${pf.min.level} | ↑${pf.max.level}`);
     }
   }
 
@@ -195,15 +195,29 @@ async function getSugarReadings(uid, dateKey) {
 }
 
 /**
- * Get weekly sugar readings (all readings)
+ * Get weekly sugar readings (all readings in the last 7 days)
  * @param {string} uid
- * @param {string} dateKey - YYYY-MM-DD format (end date)
+ * @param {string} dateKey - YYYY-MM-DD format (end date, typically today)
  * @returns {Promise<Object>} { fasting: {...}, postFood: {...} }
  */
 async function getWeeklySugarReadings(uid, dateKey) {
   try {
     const db = admin.firestore();
-    const snap = await db.collection(`users/${uid}/sugarlogs`).get();
+    
+    // Calculate date 7 days ago from dateKey
+    const [year, month, day] = dateKey.split('-');
+    const endDate = new Date(`${year}-${month}-${day}`);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 6); // 7 days including today
+    
+    const startDateStr = startDate.toISOString().split('T')[0];
+    
+    console.log(`[Report] Fetching weekly sugar from ${startDateStr} to ${dateKey}`);
+    
+    const snap = await db.collection(`users/${uid}/sugarlogs`)
+      .where('date', '>=', startDateStr)
+      .where('date', '<=', dateKey)
+      .get();
     
     const fasting = [];
     const postFood = [];
@@ -246,7 +260,7 @@ async function getWeeklySugarReadings(uid, dateKey) {
       };
     };
 
-    console.log(`[Report] Weekly sugar: fasting=${fasting.length}, postFood=${postFood.length}`);
+    console.log(`[Report] Weekly sugar (${startDateStr} to ${dateKey}): fasting=${fasting.length}, postFood=${postFood.length}`);
     
     return {
       fasting: processWeeklyReadings(fasting),
@@ -423,8 +437,8 @@ async function processWeeklyReport(uid, requestDoc) {
     }
     
     if (sugarWeekly.postFood) {
-      const a = sugarWeekly.postFood;
-      parts.push(`🍽 Post Meal: Avg ${a.avg} | ↓${a.min.level}@${a.min.date} | ↑${a.max.level}@${a.max.date}`);
+      const pf = sugarWeekly.postFood;
+      parts.push(`🍽 Post Meal: Avg ${pf.avg} | ↓${pf.min.level}@${pf.min.date} | ↑${pf.max.level}@${pf.max.date}`);
     }
 
     let message = parts.join(' | ');
