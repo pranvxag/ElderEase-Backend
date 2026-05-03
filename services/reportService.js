@@ -147,16 +147,25 @@ async function getMedicineAdherence(uid, dateKey) {
 async function getSugarReadings(uid, dateKey) {
   try {
     const db = admin.firestore();
-    const snap = await db.doc(`users/${uid}/sugarlogs/${dateKey}`).get();
+    const snap = await db.collection(`users/${uid}/sugarlogs`).where('date', '==', dateKey).get();
     
-    if (!snap.exists) {
-      console.log(`[Report] No sugar log for ${uid} on ${dateKey}`);
+    if (snap.empty) {
+      console.log(`[Report] No sugar logs for ${uid} on ${dateKey}`);
       return { fasting: null, postFood: null };
     }
 
-    const data = snap.data();
-    const fasting = data.fasting ? [data.fasting] : [];
-    const postFood = data.postFood ? [data.postFood] : [];
+    const fasting = [];
+    const postFood = [];
+
+    snap.forEach(doc => {
+      const data = doc.data();
+      if (data.fasting && typeof data.fasting.level === 'number') {
+        fasting.push(data.fasting);
+      }
+      if (data.postFood && typeof data.postFood.level === 'number') {
+        postFood.push(data.postFood);
+      }
+    });
 
     const processReadings = (arr) => {
       if (arr.length === 0) return null;
@@ -326,7 +335,7 @@ async function processDailyReport(uid, requestDoc) {
     const adherence = await getMedicineAdherence(uid, dateKey);
     const sugar = await getSugarReadings(uid, dateKey);
     
-    console.log(`[Report] Data fetched for ${uid}:`, { adherence, fasting: sugar.fasting?.count, afterMeal: sugar.afterMeal?.count });
+    console.log(`[Report] Data fetched for ${uid}:`, { adherence, fasting: sugar.fasting?.count, postFood: sugar.postFood?.count });
     
     // Build SMS message (max 150 chars)
     const message = buildReportMessage(userName, adherence, sugar);
