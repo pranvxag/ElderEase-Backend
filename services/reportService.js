@@ -147,7 +147,10 @@ async function getMedicineAdherence(uid, dateKey) {
 async function getSugarReadings(uid, dateKey) {
   try {
     const db = admin.firestore();
+    console.log(`[Report] Querying sugar logs for ${uid} with date=${dateKey}`);
     const snap = await db.collection(`users/${uid}/sugarlogs`).where('date', '==', dateKey).get();
+    console.log(`[Report] Found ${snap.size} documents`);
+    snap.forEach(doc => console.log('Doc:', doc.id, doc.data()));
     
     if (snap.empty) {
       console.log(`[Report] No sugar logs for ${uid} on ${dateKey}`);
@@ -159,6 +162,19 @@ async function getSugarReadings(uid, dateKey) {
 
     snap.forEach(doc => {
       const data = doc.data();
+      // Handle individual reading documents with type field
+      if (data.type === 'fasting' && typeof data.level === 'number') {
+        fasting.push({
+          level: data.level,
+          time: data.time || null
+        });
+      } else if (data.type === 'postFood' && typeof data.level === 'number') {
+        postFood.push({
+          level: data.level,
+          time: data.time || null
+        });
+      }
+      // Also handle nested fasting/postFood map structure if it exists
       if (data.fasting && typeof data.fasting.level === 'number') {
         fasting.push(data.fasting);
       }
