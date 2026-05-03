@@ -43,8 +43,8 @@ function buildReportMessage(userName, adherence, sugar) {
   if (sugarText) baseParts.push(sugarText);
 
   let message = baseParts.join(' | ');
-  if (message.length <= 150) {
-    return limitSmsText(message);
+  if (message.length <= 110) {
+    return limitSmsText(message, 110);
   }
 
   // Fallback: try without timestamps
@@ -80,11 +80,11 @@ function buildReportMessage(userName, adherence, sugar) {
 
   message = parts.join(' | ');
 
-  if (message.length <= 150) {
-    return limitSmsText(message);
+  if (message.length <= 110) {
+    return limitSmsText(message, 110);
   }
 
-  const maxUserNameLength = Math.max(1, 150 - 'ElderEase Daily📋 '.length);
+  const maxUserNameLength = Math.max(1, 110 - 'ElderEase Daily📋 '.length);
   const trimmedName = userName.slice(0, maxUserNameLength).trim();
   return limitSmsText(`ElderEase Daily📋 ${trimmedName}`);
 }
@@ -458,7 +458,7 @@ async function processWeeklyReport(uid, requestDoc) {
     }
 
     let message = parts.join(' | ');
-    message = limitSmsText(message);
+    message = limitSmsText(message, 110);
 
     console.log(`[Report] Weekly SMS message (${message.length} chars):`, message);
 
