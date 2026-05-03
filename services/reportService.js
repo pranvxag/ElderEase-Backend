@@ -6,18 +6,48 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
+function buildSugarText(sugarData) {
+  const parts = [];
+
+  // Fasting data
+  if (sugarData.fasting && sugarData.fasting.readings.length > 0) {
+    const f = sugarData.fasting;
+    if (f.readings.length === 1) {
+      parts.push(`🩸 Fast: ${f.readings[0].level}`);
+    } else {
+      const timeStr = f.min.time ? ` (${f.min.time})` : '';
+      parts.push(`🩸 Fast: ${f.avg}(avg) | ↓${f.min.level}${timeStr} | ↑${f.max.level}`);
+    }
+  }
+
+  // Post-meal data
+  if (sugarData.postFood && sugarData.postFood.readings.length > 0) {
+    const a = sugarData.postFood;
+    if (a.readings.length === 1) {
+      parts.push(`🍽 Post Meal: ${a.readings[0].level}`);
+    } else {
+      const timeStr = a.min.time ? ` (${a.min.time})` : '';
+      parts.push(`🍽 Post Meal: ${a.avg}(avg) | ↓${a.min.level}${timeStr} | ↑${a.max.level}`);
+    }
+  }
+
+  return parts.join(' | ');
+}
+
 function buildReportMessage(userName, adherence, sugar) {
   const baseParts = [`ElderEase Daily📋 ${userName}`];
 
   if (adherence !== null) baseParts.push(`💊 Med: ${adherence}%`);
-  if (sugar.fasting !== null) baseParts.push(`🩸 Fast: ${sugar.fasting}`);
-  if (sugar.afterMeal !== null) baseParts.push(`🍽 PM: ${sugar.afterMeal}`);
+  
+  const sugarText = buildSugarText(sugar);
+  if (sugarText) baseParts.push(sugarText);
 
   let message = baseParts.join(' | ');
   if (message.length <= 150) {
     return limitSmsText(message);
   }
 
+  // Fallback: try without timestamps
   const parts = [`ElderEase Daily📋 ${userName}`];
   const addPartIfFits = (part) => {
     const candidate = [...parts, part].join(' | ');
@@ -29,8 +59,24 @@ function buildReportMessage(userName, adherence, sugar) {
   };
 
   if (adherence !== null) addPartIfFits(`💊 Med: ${adherence}%`);
-  if (sugar.fasting !== null) addPartIfFits(`🩸 Fast: ${sugar.fasting}`);
-  if (sugar.afterMeal !== null) addPartIfFits(`🍽 PM: ${sugar.afterMeal}`);
+  
+  if (sugar.fasting && sugar.fasting.readings.length > 0) {
+    const f = sugar.fasting;
+    if (f.readings.length === 1) {
+      addPartIfFits(`🩸 Fast: ${f.readings[0].level}`);
+    } else {
+      addPartIfFits(`🩸 Fast: ${f.avg}(avg) | ↓${f.min.level} | ↑${f.max.level}`);
+    }
+  }
+
+  if (sugar.postFood && sugar.postFood.readings.length > 0) {
+    const a = sugar.postFood;
+    if (a.readings.length === 1) {
+      addPartIfFits(`🍽 Post Meal: ${a.readings[0].level}`);
+    } else {
+      addPartIfFits(`🍽 Post Meal: ${a.avg}(avg) | ↓${a.min.level} | ↑${a.max.level}`);
+    }
+  }
 
   message = parts.join(' | ');
 
@@ -88,6 +134,118 @@ async function getMedicineAdherence(uid, dateKey) {
   } catch (err) {
     console.error(`[Report] Error fetching medicine adherence for ${uid} on ${dateKey}:`, err.message);
     return null;
+  }
+}
+
+/**
+ * Get detailed sugar readings (fasting and postFood) for a user on a specific date
+ * Returns individual readings with timestamps, avg, min, max
+ * @param {string} uid
+ * @param {string} dateKey - YYYY-MM-DD format
+ * @returns {Promise<Object>} { fasting: {...}, postFood: {...} }
+ */
+async function getSugarReadings(uid, dateKey) {
+  try {
+    const db = admin.firestore();
+    const snap = await db.doc(`users/${uid}/sugarlogs/${dateKey}`).get();
+    
+    if (!snap.exists) {
+      console.log(`[Report] No sugar log for ${uid} on ${dateKey}`);
+      return { fasting: null, postFood: null };
+    }
+
+    const data = snap.data();
+    const fasting = data.fasting ? [data.fasting] : [];
+    const postFood = data.postFood ? [data.postFood] : [];
+
+    const processReadings = (arr) => {
+      if (arr.length === 0) return null;
+      
+      const sorted = [...arr].sort((a, b) => a.level - b.level);
+      const avg = Math.round(arr.reduce((sum, r) => sum + r.level, 0) / arr.length);
+      
+      return {
+        readings: arr,
+        count: arr.length,
+        avg,
+        min: { level: sorted[0].level, time: sorted[0].time },
+        max: { level: sorted[arr.length - 1].level, time: sorted[arr.length - 1].time }
+      };
+    };
+
+    console.log(`[Report] Sugar logs for ${uid} on ${dateKey}: fasting=${fasting.length}, postFood=${postFood.length}`);
+    
+    return {
+      fasting: processReadings(fasting),
+      postFood: processReadings(postFood)
+    };
+  } catch (err) {
+    console.error(`[Report] Error fetching sugar readings for ${uid} on ${dateKey}:`, err.message);
+    return { fasting: null, postFood: null };
+  }
+}
+
+/**
+ * Get weekly sugar readings (all readings)
+ * @param {string} uid
+ * @param {string} dateKey - YYYY-MM-DD format (end date)
+ * @returns {Promise<Object>} { fasting: {...}, postFood: {...} }
+ */
+async function getWeeklySugarReadings(uid, dateKey) {
+  try {
+    const db = admin.firestore();
+    const snap = await db.collection(`users/${uid}/sugarlogs`).get();
+    
+    const fasting = [];
+    const postFood = [];
+    
+    snap.forEach(doc => {
+      const data = doc.data();
+      if (!data.date) return;
+      
+      if (data.fasting && typeof data.fasting.level === 'number') {
+        fasting.push({
+          level: data.fasting.level,
+          date: data.date,
+          time: data.fasting.time || null
+        });
+      }
+      
+      if (data.postFood && typeof data.postFood.level === 'number') {
+        postFood.push({
+          level: data.postFood.level,
+          date: data.date,
+          time: data.postFood.time || null
+        });
+      }
+    });
+
+    const processWeeklyReadings = (arr) => {
+      if (arr.length === 0) return null;
+      
+      const sorted = [...arr].sort((a, b) => a.level - b.level);
+      const avg = Math.round(arr.reduce((sum, r) => sum + r.level, 0) / arr.length);
+      const minReading = sorted[0];
+      const maxReading = sorted[arr.length - 1];
+      
+      return {
+        count: arr.length,
+        avg,
+        readings: arr,
+        min: { level: minReading.level, date: minReading.date, time: minReading.time },
+        max: { level: maxReading.level, date: maxReading.date, time: maxReading.time }
+      };
+    };
+
+    console.log(`[Report] Weekly sugar: fasting=${fasting.length}, postFood=${postFood.length}`);
+    
+    return {
+      fasting: processWeeklyReadings(fasting),
+      postFood: processWeeklyReadings(postFood)
+    };
+  } catch (err) {
+    console.error(`[Report] Error fetching weekly sugar for ${uid}:`, err.message);
+    return { fasting: null, postFood: null };
   }
 }
 
@@ -166,9 +324,9 @@ async function processDailyReport(uid, requestDoc) {
     
     // Fetch adherence and sugar data
     const adherence = await getMedicineAdherence(uid, dateKey);
-    const sugar = await getSugarAverages(uid, dateKey);
+    const sugar = await getSugarReadings(uid, dateKey);
     
-    console.log(`[Report] Data fetched for ${uid}:`, { adherence, sugar });
+    console.log(`[Report] Data fetched for ${uid}:`, { adherence, fasting: sugar.fasting?.count, afterMeal: sugar.afterMeal?.count });
     
     // Build SMS message (max 150 chars)
     const message = buildReportMessage(userName, adherence, sugar);
@@ -244,15 +402,21 @@ async function processWeeklyReport(uid, requestDoc) {
     const caregiver = contacts.find(c => c.slot === 'primary-caregiver') ?? contacts.find(c => c.isPrimary) ?? null;
     const doctor = contacts.find(c => c.slot === 'doctor') ?? null;
 
-    // For weekly we reuse the daily helpers; if dateKey is present use it, otherwise fetch latest day (null -> helpers return nulls)
-    const adherence = dateKey ? await getMedicineAdherence(uid, dateKey) : null;
-    const sugar = dateKey ? await getSugarAverages(uid, dateKey) : { fasting: null, afterMeal: null };
+    // Fetch weekly sugar readings
+    const sugarWeekly = await getWeeklySugarReadings(uid, dateKey);
 
-    // Build a concise weekly summary
+    // Build weekly summary with high/low/timestamps
     const parts = [`ElderEase Weekly📋 ${userName}`];
-    if (adherence !== null) parts.push(`💊 AvgMed: ${adherence}%`);
-    if (sugar.fasting !== null) parts.push(`🩸 FastAvg: ${sugar.fasting}`);
-    if (sugar.afterMeal !== null) parts.push(`🍽 PMAvg: ${sugar.afterMeal}`);
+    
+    if (sugarWeekly.fasting) {
+      const f = sugarWeekly.fasting;
+      parts.push(`🩸 Fast: Avg ${f.avg} | ↓${f.min.level}@${f.min.date} | ↑${f.max.level}@${f.max.date}`);
+    }
+    
+    if (sugarWeekly.postFood) {
+      const a = sugarWeekly.postFood;
+      parts.push(`🍽 Post Meal: Avg ${a.avg} | ↓${a.min.level}@${a.min.date} | ↑${a.max.level}@${a.max.date}`);
+    }
 
     let message = parts.join(' | ');
     message = limitSmsText(message);
@@ -287,7 +451,19 @@ async function processWeeklyReport(uid, requestDoc) {
       const ref = await db.collection('users').doc(uid).collection('weeklyReports').add({
         generatedAt: new Date().toISOString(),
         summary: message,
-        sourceRequest: requestDoc.id || null
+        sourceRequest: requestDoc.id || null,
+        fastingStats: sugarWeekly.fasting ? {
+          count: sugarWeekly.fasting.count,
+          avg: sugarWeekly.fasting.avg,
+          min: sugarWeekly.fasting.min,
+          max: sugarWeekly.fasting.max
+        } : null,
+        afterMealStats: sugarWeekly.afterMeal ? {
+          count: sugarWeekly.afterMeal.count,
+          avg: sugarWeekly.afterMeal.avg,
+          min: sugarWeekly.afterMeal.min,
+          max: sugarWeekly.afterMeal.max
+        } : null
       });
       console.log(`[Report] Weekly summary saved: ${ref.id}`);
     } catch (err) {
@@ -316,6 +492,8 @@ module.exports = {
   getProfileData,
   getMedicineAdherence,
   getSugarAverages,
+  getSugarReadings,
+  getWeeklySugarReadings,
   processDailyReport,
   processWeeklyReport,
 };
