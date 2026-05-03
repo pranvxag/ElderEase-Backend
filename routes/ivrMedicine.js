@@ -42,20 +42,42 @@ const VOICE_LANG_MAP = {
     mr: 'mr-IN',
 };
 
+const VOICE_NAME_MAP = {
+    en: 'alice',
+    hi: 'Polly.Aditi',
+    mr: 'Polly.Aditi',
+};
+
+function normalizeLang(input) {
+    const value = String(input || '').trim().toLowerCase();
+
+    if (value === 'hi' || value === 'hindi' || value === 'hindhi') {
+        return 'hi';
+    }
+
+    if (value === 'mr' || value === 'marathi') {
+        return 'mr';
+    }
+
+    return 'en';
+}
+
 function buildPromptTwiml(uid, entryId, medicineName, logDate, lang = 'en') {
     const twiml = new twilio.twiml.VoiceResponse();
-    const voiceLang = VOICE_LANG_MAP[lang] ?? 'en-IN';
+    const normalizedLang = normalizeLang(lang);
+    const voiceLang = VOICE_LANG_MAP[normalizedLang] ?? 'en-IN';
+    const voiceName = VOICE_NAME_MAP[normalizedLang] ?? 'alice';
 
     const gather = twiml.gather({
         numDigits: 1,
-        action: `/ivr/medicine-response?uid=${encodeURIComponent(uid)}&entryId=${encodeURIComponent(entryId)}&medicineName=${encodeURIComponent(medicineName)}&logDate=${encodeURIComponent(logDate ?? '')}&lang=${lang}`,
+        action: `/ivr/medicine-response?uid=${encodeURIComponent(uid)}&entryId=${encodeURIComponent(entryId)}&medicineName=${encodeURIComponent(medicineName)}&logDate=${encodeURIComponent(logDate ?? '')}&lang=${normalizedLang}`,
         method: 'POST',
         timeout: 10,
         actionOnEmptyResult: true,
     });
 
-    gather.say({ voice: 'alice', language: voiceLang }, MESSAGES.prompt[lang](medicineName));
-    twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.noResponse[lang]());
+    gather.say({ voice: voiceName, language: voiceLang }, MESSAGES.prompt[normalizedLang](medicineName));
+    twiml.say({ voice: voiceName, language: voiceLang }, MESSAGES.noResponse[normalizedLang]());
 
     return twiml;
 }
@@ -65,7 +87,7 @@ async function handleMedicineReminder(req, res) {
     const entryId = req.query.entryId || req.body.entryId;
     const medicineName = req.query.medicineName || req.body.medicineName || 'your medicine';
     const logDate = req.query.logDate || req.body.logDate;
-    const lang = req.query.lang || req.body.lang || 'en';
+    const lang = normalizeLang(req.query.lang || req.body.lang || 'en');
 
     console.log(`[Medicine Reminder] 🌐 IVR /medicine-reminder hit → uid=${uid} medicine=${medicineName} lang=${lang}`);
 
@@ -78,8 +100,9 @@ async function handleMedicineResponse(req, res) {
     const entryId = req.query.entryId || req.body.entryId;
     const medicineName = req.query.medicineName || req.body.medicineName || 'your medicine';
     const logDate = req.query.logDate || req.body.logDate;
-    const lang = req.query.lang || req.body.lang || 'en';
+    const lang = normalizeLang(req.query.lang || req.body.lang || 'en');
     const voiceLang = VOICE_LANG_MAP[lang] ?? 'en-IN';
+    const voiceName = VOICE_NAME_MAP[lang] ?? 'alice';
     const digit = req.body.Digits;
 
     console.log(`[Medicine Reminder] 🔢 IVR /medicine-response hit → uid=${uid} digit=${digit ?? 'none'} medicine=${medicineName} lang=${lang}`);
@@ -89,15 +112,15 @@ async function handleMedicineResponse(req, res) {
     if (digit === '1') {
         await updateMedicineEntryStatus(uid, entryId, 'taken', { logDate });
         await sendCaregiverSMS(uid, medicineName, 'taken');
-        twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.taken[lang](medicineName));
+        twiml.say({ voice: voiceName, language: voiceLang }, MESSAGES.taken[lang](medicineName));
         console.log(`[Medicine Reminder] ✅ User ${uid} TOOK ${medicineName}`);
     } else if (digit === '2') {
         await scheduleSnoozedCall(uid, entryId, medicineName, 15, { logDate, lang });
-        twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.snoozed[lang](medicineName));
+        twiml.say({ voice: voiceName, language: voiceLang }, MESSAGES.snoozed[lang](medicineName));
         console.log(`[Medicine Reminder] 😴 User ${uid} SNOOZED ${medicineName} — will retry in 15 min`);
     } else {
         await scheduleSnoozedCall(uid, entryId, medicineName, 15, { logDate, lang });
-        twiml.say({ voice: 'alice', language: voiceLang }, MESSAGES.invalid[lang]());
+        twiml.say({ voice: voiceName, language: voiceLang }, MESSAGES.invalid[lang]());
         console.log(`[Medicine Reminder] ❓ User ${uid} gave no/invalid input for ${medicineName} — will retry in 15 min`);
     }
 
@@ -109,7 +132,7 @@ async function handleCallStatus(req, res) {
     const entryId = req.query.entryId || req.body.entryId;
     const medicineName = req.query.medicineName || req.body.medicineName || 'your medicine';
     const logDate = req.query.logDate || req.body.logDate;
-    const lang = req.query.lang || req.body.lang || 'en';
+    const lang = normalizeLang(req.query.lang || req.body.lang || 'en');
     const callStatus = req.body.CallStatus;
 
     console.log(`[Medicine Reminder] 📊 IVR /call-status hit → uid=${uid} status=${callStatus} medicine=${medicineName}`);
