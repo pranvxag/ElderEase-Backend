@@ -137,9 +137,10 @@ async function processDailyReport(uid, requestDoc) {
   try {
     console.log(`[Report] Processing daily report for ${uid}:`, { id: requestDoc.id, date: requestDoc.date, type: requestDoc.type });
     
-    // Convert date format from D/M/YYYY to YYYY-MM-DD
-    const [month, day, year] = requestDoc.date.split('/');
+    // Convert date format from D/M/YYYY to YYYY-MM-DD (input is day/month/year)
+    const [day, month, year] = requestDoc.date.split('/');
     const dateKey = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    console.log('[Report] dateKey generated:', dateKey);
     console.log(`[Report] Date converted: ${requestDoc.date} -> ${dateKey}`);
     
     // Fetch profile and contacts
@@ -212,9 +213,109 @@ async function processDailyReport(uid, requestDoc) {
   }
 }
 
+/**
+ * Process a weekly report request: build short weekly summary, send SMS, persist summary, mark completed
+ * @param {string} uid
+ * @param {Object} requestDoc
+ */
+async function processWeeklyReport(uid, requestDoc) {
+  try {
+    console.log(`[Report] Processing weekly report for ${uid}:`, { id: requestDoc.id, date: requestDoc.date, type: requestDoc.type });
+
+    // Normalize date if provided (accepts D/M/YYYY same as daily)
+    let dateKey = null;
+    if (requestDoc.date) {
+      const parts = requestDoc.date.split('/');
+      if (parts.length === 3) {
+        const [day, month, year] = parts;
+        dateKey = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+
+    const profile = await getProfileData(uid);
+    if (!profile) {
+      console.warn(`[Report] No profile found for ${uid}, skipping weekly report`);
+      return;
+    }
+
+    const userName = profile?.displayName ?? profile?.name ?? 'Patient';
+    const contacts = profile?.emergencyContacts ?? [];
+
+    const caregiver = contacts.find(c => c.slot === 'primary-caregiver') ?? contacts.find(c => c.isPrimary) ?? null;
+    const doctor = contacts.find(c => c.slot === 'doctor') ?? null;
+
+    // For weekly we reuse the daily helpers; if dateKey is present use it, otherwise fetch latest day (null -> helpers return nulls)
+    const adherence = dateKey ? await getMedicineAdherence(uid, dateKey) : null;
+    const sugar = dateKey ? await getSugarAverages(uid, dateKey) : { fasting: null, afterMeal: null };
+
+    // Build a concise weekly summary
+    const parts = [`ElderEase Weekly📋 ${userName}`];
+    if (adherence !== null) parts.push(`💊 AvgMed: ${adherence}%`);
+    if (sugar.fasting !== null) parts.push(`🩸 FastAvg: ${sugar.fasting}`);
+    if (sugar.afterMeal !== null) parts.push(`🍽 PMAvg: ${sugar.afterMeal}`);
+
+    let message = parts.join(' | ');
+    message = limitSmsText(message);
+
+    console.log(`[Report] Weekly SMS message (${message.length} chars):`, message);
+
+    if (!twilioClient) {
+      console.warn('[Report] Twilio not configured, skipping weekly SMS send');
+    } else {
+      const phones = [];
+      if (caregiver?.phone) phones.push({ name: 'Caregiver', phone: caregiver.phone });
+      if (doctor?.phone) phones.push({ name: 'Doctor', phone: doctor.phone });
+
+      console.log(`[Report] Sending weekly report SMS to ${phones.length} recipient(s) for ${uid}`);
+      for (const contact of phones) {
+        try {
+          await twilioClient.messages.create({
+            to: contact.phone,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            body: message
+          });
+          console.log(`[Report] Weekly report SMS sent to ${contact.name}:`, contact.phone);
+        } catch (err) {
+          console.error(`[Report] Failed to send weekly SMS to ${contact.name} (${contact.phone}):`, err.message);
+        }
+      }
+    }
+
+    // Persist weekly summary
+    try {
+      const db = admin.firestore();
+      const ref = await db.collection('users').doc(uid).collection('weeklyReports').add({
+        generatedAt: new Date().toISOString(),
+        summary: message,
+        sourceRequest: requestDoc.id || null
+      });
+      console.log(`[Report] Weekly summary saved: ${ref.id}`);
+    } catch (err) {
+      console.error('[Report] Failed to persist weekly summary:', err.message);
+    }
+
+    // Mark request as completed
+    try {
+      const db2 = admin.firestore();
+      await db2.doc(`users/${uid}/reportRequests/${requestDoc.id}`).update({
+        status: 'completed',
+        processedAt: new Date().toISOString()
+      });
+      console.log(`[Report] ✅ Weekly report completed for ${uid}:`, requestDoc.id);
+    } catch (err) {
+      console.error('[Report] Failed to mark weekly request completed:', err.message);
+    }
+
+  } catch (err) {
+    console.error(`[Report] ❌ Error processing weekly report for ${uid}:`, err.message);
+    throw err;
+  }
+}
+
 module.exports = {
   getProfileData,
   getMedicineAdherence,
   getSugarAverages,
   processDailyReport,
+  processWeeklyReport,
 };

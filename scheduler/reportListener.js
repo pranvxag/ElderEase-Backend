@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const { processDailyReport } = require('../services/reportService');
+const { processDailyReport, processWeeklyReport } = require('../services/reportService');
 
 function startReportListener() {
   const db = admin.firestore();
@@ -24,10 +24,11 @@ function startReportListener() {
         try {
           if (data.type === 'daily') {
             await processDailyReport(uid, { ...data, id: doc.id });
+          } else if (data.type === 'weekly') {
+            await processWeeklyReport(uid, { ...data, id: doc.id });
           } else {
-            console.log(`[Report] Skipping non-daily request for uid=${uid}, requestId=${doc.id}, type=${data.type}`);
+            console.log(`[Report] Skipping unknown request type for uid=${uid}, requestId=${doc.id}, type=${data.type}`);
           }
-          // weekly: skip for now
         } catch (err) {
           console.error('Report processing failed:', { uid, id: doc.id, err: err.message });
         }
