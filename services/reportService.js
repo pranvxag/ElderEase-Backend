@@ -35,6 +35,7 @@ function buildSugarText(sugarData) {
 }
 
 function buildReportMessage(userName, adherence, sugar) {
+  const SMS_LIMIT = process.env.NODE_ENV === 'production' ? 155 : 120;
   const baseParts = [`ElderEase Daily📋 ${userName}`];
 
   if (adherence !== null) baseParts.push(`💊 Med: ${adherence}%`);
@@ -43,15 +44,15 @@ function buildReportMessage(userName, adherence, sugar) {
   if (sugarText) baseParts.push(sugarText);
 
   let message = baseParts.join(' | ');
-  if (message.length <= 110) {
-    return limitSmsText(message, 110);
+  if (message.length <= SMS_LIMIT) {
+    return limitSmsText(message, SMS_LIMIT);
   }
 
   // Fallback: try without timestamps
   const parts = [`ElderEase Daily📋 ${userName}`];
   const addPartIfFits = (part) => {
     const candidate = [...parts, part].join(' | ');
-    if (candidate.length <= 150) {
+    if (candidate.length <= SMS_LIMIT) {
       parts.push(part);
       return true;
     }
@@ -80,13 +81,13 @@ function buildReportMessage(userName, adherence, sugar) {
 
   message = parts.join(' | ');
 
-  if (message.length <= 110) {
-    return limitSmsText(message, 110);
+  if (message.length <= SMS_LIMIT) {
+    return limitSmsText(message, SMS_LIMIT);
   }
 
-  const maxUserNameLength = Math.max(1, 110 - 'ElderEase Daily📋 '.length);
+  const maxUserNameLength = Math.max(1, SMS_LIMIT - 'ElderEase Daily📋 '.length);
   const trimmedName = userName.slice(0, maxUserNameLength).trim();
-  return limitSmsText(`ElderEase Daily📋 ${trimmedName}`);
+  return limitSmsText(`ElderEase Daily📋 ${trimmedName}`, SMS_LIMIT);
 }
 
 /**
@@ -334,6 +335,12 @@ async function processDailyReport(uid, requestDoc) {
   try {
     console.log(`[Report] Processing daily report for ${uid}:`, { id: requestDoc.id, date: requestDoc.date, type: requestDoc.type });
     
+    // Guard against missing date
+    if (!requestDoc.date) {
+      console.warn(`[Report] Missing date for ${uid}, skipping`);
+      return;
+    }
+    
     // Convert date format from D/M/YYYY to YYYY-MM-DD (input is day/month/year)
     const [day, month, year] = requestDoc.date.split('/');
     const dateKey = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
@@ -418,6 +425,7 @@ async function processDailyReport(uid, requestDoc) {
 async function processWeeklyReport(uid, requestDoc) {
   try {
     console.log(`[Report] Processing weekly report for ${uid}:`, { id: requestDoc.id, date: requestDoc.date, type: requestDoc.type });
+    const SMS_LIMIT = process.env.NODE_ENV === 'production' ? 155 : 120;
 
     // Normalize date if provided (accepts D/M/YYYY same as daily)
     let dateKey = null;
@@ -427,6 +435,11 @@ async function processWeeklyReport(uid, requestDoc) {
         const [day, month, year] = parts;
         dateKey = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
       }
+    }
+
+    if (!dateKey) {
+      console.warn(`[Report] Missing date for ${uid}, skipping weekly report`);
+      return;
     }
 
     const profile = await getProfileData(uid);
@@ -443,22 +456,50 @@ async function processWeeklyReport(uid, requestDoc) {
 
     // Fetch weekly sugar readings
     const sugarWeekly = await getWeeklySugarReadings(uid, dateKey);
+    
+    // Calculate medicine adherence for the last 7 days
+    const [year, month, day] = dateKey.split('-');
+    const endDate = new Date(`${year}-${month}-${day}`);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 6); // 7 days including today
+    
+    const adherenceValues = [];
+    let currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const adherence = await getMedicineAdherence(uid, dateStr);
+      if (adherence !== null) {
+        adherenceValues.push(adherence);
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    const avgAdherence = adherenceValues.length > 0 ? Math.round(adherenceValues.reduce((a, b) => a + b, 0) / adherenceValues.length) : null;
+
+    // Helper function to format date from YYYY-MM-DD to DD/MM
+    const fmtDate = (d) => {
+      const [y, m, day] = d.split('-');
+      return `${day}/${m}`;
+    };
 
     // Build weekly summary with high/low/timestamps
     const parts = [`ElderEase Weekly📋 ${userName}`];
     
+    if (avgAdherence !== null) {
+      parts.push(`💊 Med: ${avgAdherence}%`);
+    }
+    
     if (sugarWeekly.fasting) {
       const f = sugarWeekly.fasting;
-      parts.push(`🩸 Fast: Avg ${f.avg} | ↓${f.min.level}@${f.min.date} | ↑${f.max.level}@${f.max.date}`);
+      parts.push(`🩸 Fast: Avg ${f.avg} | ↓${f.min.level}@${fmtDate(f.min.date)} | ↑${f.max.level}@${fmtDate(f.max.date)}`);
     }
     
     if (sugarWeekly.postFood) {
       const pf = sugarWeekly.postFood;
-      parts.push(`🍽 Post Meal: Avg ${pf.avg} | ↓${pf.min.level}@${pf.min.date} | ↑${pf.max.level}@${pf.max.date}`);
+      parts.push(`🍽 Post Meal: Avg ${pf.avg} | ↓${pf.min.level}@${fmtDate(pf.min.date)} | ↑${pf.max.level}@${fmtDate(pf.max.date)}`);
     }
 
     let message = parts.join(' | ');
-    message = limitSmsText(message, 110);
+    message = limitSmsText(message, SMS_LIMIT);
 
     console.log(`[Report] Weekly SMS message (${message.length} chars):`, message);
 
@@ -497,11 +538,11 @@ async function processWeeklyReport(uid, requestDoc) {
           min: sugarWeekly.fasting.min,
           max: sugarWeekly.fasting.max
         } : null,
-        afterMealStats: sugarWeekly.afterMeal ? {
-          count: sugarWeekly.afterMeal.count,
-          avg: sugarWeekly.afterMeal.avg,
-          min: sugarWeekly.afterMeal.min,
-          max: sugarWeekly.afterMeal.max
+        afterMealStats: sugarWeekly.postFood ? {
+          count: sugarWeekly.postFood.count,
+          avg: sugarWeekly.postFood.avg,
+          min: sugarWeekly.postFood.min,
+          max: sugarWeekly.postFood.max
         } : null
       });
       console.log(`[Report] Weekly summary saved: ${ref.id}`);
